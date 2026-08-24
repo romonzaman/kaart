@@ -611,12 +611,12 @@ func TestReviewStoresPreReviewState(t *testing.T) {
 	if stats.NextDue == nil {
 		t.Fatal("next_due = null, want the learning card's due time")
 	}
-	nextDue, err := time.Parse(time.RFC3339Nano, *stats.NextDue)
+	statsNextDue, err := time.Parse(time.RFC3339Nano, *stats.NextDue)
 	if err != nil {
 		t.Fatalf("parsing next_due %q: %v", *stats.NextDue, err)
 	}
-	if !nextDue.After(h.clock.Now()) {
-		t.Fatalf("next_due %v is not in the future", nextDue)
+	if !statsNextDue.After(h.clock.Now()) {
+		t.Fatalf("next_due %v is not in the future", statsNextDue)
 	}
 }
 

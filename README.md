@@ -49,16 +49,25 @@ curl -s -X POST localhost:8080/api/v1/decks/$DECK/cards \
 curl -s "localhost:8080/api/v1/decks/$DECK/queue"
 ```
 
-### Server flags
+### Server configuration
 
-| Flag | Default | |
-|---|---|---|
-| `--db` | `./kaart.db` | SQLite file; created and migrated on first run |
-| `--addr` | `127.0.0.1:8080` | Listen address |
-| `--cors-origin` | `http://localhost:8081` | Repeatable; allowed browser origins |
-| `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
-| `--migrate-only` | | Apply migrations and exit |
-| `--version` | | Print version and exit |
+Every setting can arrive as a flag or as an environment variable. Precedence is
+**flag > environment > env file > default**.
+
+| Flag | Environment | Default | |
+|---|---|---|---|
+| `--db` | `KAART_DB` | `./kaart.db` | SQLite file; created and migrated on first run |
+| `--addr` | `KAART_ADDR` | `127.0.0.1:8080` | Listen address |
+| `--cors-origin` | `KAART_CORS_ORIGINS` | `http://localhost:8081` | Allowed browser origins; the flag repeats, the variable is comma-separated |
+| `--log-level` | `KAART_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `--env-file` | `KAART_ENV_FILE` | `.env` | File of `KEY=VALUE` defaults |
+| `--migrate-only` | | | Apply migrations and exit |
+| `--version` | | | Print version and exit |
+
+`cp .env.example .env` and edit it to avoid retyping flags. Values already in
+the environment are never overwritten from the file, so the same format is read
+directly by systemd's `EnvironmentFile=` on a server. A malformed file makes the
+process refuse to start rather than quietly fall back to a default.
 
 The app reads `EXPO_PUBLIC_API_URL` and defaults to `http://localhost:8080`. Set
 it in `app/.env` to point a phone at a laptop running the server.
@@ -68,6 +77,7 @@ it in `app/.env` to point a phone at a laptop running the server.
 Backend: `deps` · `build` · `test` · `lint` · `fmt` · `vet` · `run` · `migrate` · `clean`
 Frontend: `app-deps` · `app` · `app-typecheck` · `app-test` · `app-check`
 Both: `check`
+Release: `build-linux` · `web` · `dist`
 
 ---
 
@@ -88,8 +98,10 @@ The review loop is completable without touching the mouse.
 
 ```
 cmd/kaartd/          server entrypoint, flags, graceful shutdown
+deploy/              systemd unit, nginx snippet, install.sh
 internal/
   api/               HTTP handlers, routing, middleware, validation
+  config/            env-file loading and precedence
   store/             Store interface
   store/sqlite/      the only implementation in v1
   store/migrations/  goose .sql files, embedded
@@ -156,6 +168,7 @@ path back through the scheduler, not just a deleted row.
 - [docs/schema.md](docs/schema.md) — every table, and why `reviews` is append-only
 - [docs/api.md](docs/api.md) — every endpoint with curl examples
 - [docs/scheduling.md](docs/scheduling.md) — FSRS in plain language, and what the four ratings mean
+- [docs/deployment.md](docs/deployment.md) — running it on a Debian 12 server, and why that needs a proxy
 - [docs/course-tasks.md](docs/course-tasks.md) — prompts for building, curating, restructuring, and reporting on course decks through an agent
 
 ## Where the server runs
@@ -164,6 +177,18 @@ path back through the scheduler, not just a deleted row.
 point of local-first, but it is worth saying plainly: nobody is running this for
 you, and closing the terminal stops it. Phase 7 of the plan embeds the web UI in
 the binary so it becomes a single download.
+
+You can put it on a server anyway — `make dist` builds a static linux/amd64
+binary, the web bundle, a systemd unit and an nginx snippet, and
+[docs/deployment.md](docs/deployment.md) is the Debian 12 runbook. It targets a
+subpath of an existing host (`https://your-host/kaartd/` for the UI,
+`/kaartd/api/` for the API); `make dist BASE_PATH=/other` changes the prefix.
+One caveat governs that whole document and belongs here too:
+
+> **`kaartd` has no authentication.** No login, no token, no API key. Anyone who
+> can reach the port can read and write every card. Keep it bound to loopback and
+> put a reverse proxy with TLS and auth in front of it. `KAART_ADDR=0.0.0.0:8080`
+> publishes an unauthenticated read-write database to the internet.
 
 ## Contributing
 

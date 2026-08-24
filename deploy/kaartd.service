@@ -1,0 +1,75 @@
+# Kaart server unit for Debian 12 (systemd 252).
+#
+# Install to /etc/systemd/system/kaartd.service. See docs/deployment.md.
+#
+# The listen address lives in /etc/kaart/kaart.env, not here, so that changing
+# the port does not mean editing a unit file and reloading the daemon.
+
+[Unit]
+Description=Kaart flashcard server
+Documentation=https://github.com/romonzaman/kaart
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=www-data
+Group=www-data
+
+EnvironmentFile=/etc/kaart/kaart.env
+
+# Migrate as a separate step so a schema failure is reported against a unit
+# that never claimed to be serving, instead of as a crash loop.
+ExecStartPre=/usr/local/bin/kaartd --migrate-only
+ExecStart=/usr/local/mkapps/kaartd/kaartd
+
+Restart=on-failure
+RestartSec=2s
+
+# Matches the binary's own 10s shutdown grace, with room to finish flushing.
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+
+# Creates and owns /var/lib/kaart, and survives the package being removed.
+# ProtectSystem=strict makes this the only writable path in the filesystem.
+StateDirectory=kaart
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/kaart
+
+# Logs are JSON on stdout; the journal keeps them.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kaartd
+
+# --- hardening ---
+# kaartd opens one file and one loopback socket. Everything else is denied.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+# AF_NETLINK and AF_UNIX are included because the Go runtime's resolver
+# enumerates interfaces through them even when the listen address is literal.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

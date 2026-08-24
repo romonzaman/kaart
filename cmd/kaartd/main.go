@@ -20,6 +20,7 @@ import (
 
 	"github.com/romonzaman/kaart/internal/api"
 	"github.com/romonzaman/kaart/internal/clock"
+	"github.com/romonzaman/kaart/internal/config"
 	"github.com/romonzaman/kaart/internal/store/sqlite"
 )
 
@@ -47,6 +48,47 @@ func (o *originList) Set(v string) error {
 	return nil
 }
 
+// Settings can arrive as flags or as environment variables, so that a systemd
+// unit configures the server with an EnvironmentFile and never a command line.
+// A flag always beats the environment.
+const (
+	envFileKey     = "KAART_ENV_FILE"
+	envDB          = "KAART_DB"
+	envAddr        = "KAART_ADDR"
+	envLogLevel    = "KAART_LOG_LEVEL"
+	envCORSOrigins = "KAART_CORS_ORIGINS"
+)
+
+// defaultEnvFile is read from the working directory when nothing names another.
+// Missing is fine — it is a development convenience, not a requirement.
+const defaultEnvFile = ".env"
+
+// defaultOrigin is Expo web's default dev server.
+const defaultOrigin = "http://localhost:8081"
+
+// envFileFromArgs finds --env-file ahead of flag.Parse. The flag package cannot
+// help here: the file names the defaults the other flags are defined with, so
+// it has to be resolved before any of them exist. The flag is still registered
+// afterwards so that -h documents it and an unknown-flag error is not raised.
+func envFileFromArgs(args []string) string {
+	for i, arg := range args {
+		if arg == "--" {
+			break
+		}
+		name, value, hasValue := strings.Cut(arg, "=")
+		if name != "-env-file" && name != "--env-file" {
+			continue
+		}
+		if hasValue {
+			return value
+		}
+		if i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return config.String(envFileKey, defaultEnvFile)
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "kaartd: %v\n", err)
@@ -55,15 +97,23 @@ func main() {
 }
 
 func run() error {
+	// The env file has to be read before the flags are defined, because it
+	// supplies the default every flag below is declared with.
+	envFile := envFileFromArgs(os.Args[1:])
+	if err := config.LoadEnvFile(envFile); err != nil {
+		return err
+	}
+
 	var (
-		dbPath        = flag.String("db", "./kaart.db", "path to the SQLite database file")
-		addr          = flag.String("addr", "127.0.0.1:8080", "address to listen on")
-		logLevel      = flag.String("log-level", "info", "log level: debug, info, warn, error")
-		migrateOnly   = flag.Bool("migrate-only", false, "apply migrations and exit")
-		showVersion   = flag.Bool("version", false, "print the version and exit")
-		corsOrigins   originList
-		defaultOrigin = "http://localhost:8081" // Expo web's default dev server
+		dbPath      = flag.String("db", config.String(envDB, "./kaart.db"), "path to the SQLite database file")
+		addr        = flag.String("addr", config.String(envAddr, "127.0.0.1:8080"), "address to listen on")
+		logLevel    = flag.String("log-level", config.String(envLogLevel, "info"), "log level: debug, info, warn, error")
+		migrateOnly = flag.Bool("migrate-only", false, "apply migrations and exit")
+		showVersion = flag.Bool("version", false, "print the version and exit")
+		corsOrigins originList
 	)
+	flag.String("env-file", envFile,
+		"file of KEY=VALUE defaults; values already in the environment win")
 	flag.Var(&corsOrigins, "cors-origin",
 		"browser origin allowed to call the API; repeatable (default "+defaultOrigin+")")
 	flag.Parse()
@@ -71,6 +121,9 @@ func run() error {
 	if *showVersion {
 		fmt.Println(version)
 		return nil
+	}
+	if len(corsOrigins) == 0 {
+		corsOrigins = config.List(envCORSOrigins)
 	}
 	if len(corsOrigins) == 0 {
 		corsOrigins = originList{defaultOrigin}
